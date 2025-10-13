@@ -21,13 +21,9 @@ class DockerOrchestrator:
             "AWS_REGION": settings.AWS_REGION
         }
 
-    def _get_aws_volume(self) -> Dict[str, Dict[str, str]]:
-        aws_path = os.path.expanduser("~/.aws")
-        if not os.path.exists(aws_path):
-            raise FileNotFoundError(f"No se encontró la carpeta de credenciales en {aws_path}")
-        return {
-            aws_path: {"bind": "/root/.aws", "mode": "ro"}
-        }
+    def _get_aws_volume(self):
+        aws_path = os.environ.get("AWS_CREDENTIALS_HOST_PATH", os.path.expanduser("~/.aws"))
+        return {aws_path: {"bind": "/root/.aws", "mode": "ro"}}
 
     def _parse_container_output(self, output: bytes) -> Dict[str, Any]:
         """Parsea la salida del contenedor."""
