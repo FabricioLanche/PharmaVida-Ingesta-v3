@@ -4,6 +4,7 @@ from typing import Dict, Any
 from app.core.config import settings
 import json
 import os
+from pathlib import Path
 
 
 class DockerOrchestrator:
@@ -21,9 +22,23 @@ class DockerOrchestrator:
             "AWS_REGION": settings.AWS_REGION
         }
 
-    def _get_aws_volume(self):
-        aws_path = os.environ.get("AWS_CREDENTIALS_HOST_PATH", os.path.expanduser("~/.aws"))
-        return {aws_path: {"bind": "/root/.aws", "mode": "ro"}}
+    def _get_aws_volume(self) -> Dict[str, Any]:
+        """Monta el volumen de credenciales AWS desde el host."""
+        # Obtener ruta de credenciales desde variable de entorno o default
+        aws_credentials_path = os.getenv(
+            "AWS_CREDENTIALS_HOST_PATH",
+            str(Path.home() / ".aws")
+        )
+
+        # Verificar que la ruta existe en el host
+        if not os.path.exists(aws_credentials_path):
+            raise RuntimeError(
+                f"No se encontraron credenciales AWS en {aws_credentials_path}. "
+                f"Por favor, asegúrate de que ~/.aws/credentials existe en el host."
+            )
+
+        # Montar la carpeta .aws del host en /root/.aws del contenedor (read-only)
+        return {aws_credentials_path: {"bind": "/root/.aws", "mode": "ro"}}
 
     def _parse_container_output(self, output: bytes) -> Dict[str, Any]:
         """Parsea la salida del contenedor."""
@@ -46,13 +61,15 @@ class DockerOrchestrator:
                 "MONGO_DATABASE": settings.MONGO_DATABASE,
             })
 
+            volumes = self._get_aws_volume()
+
             container = self.client.containers.run(
                 image="pharmavida-ingesta-mongodb:latest",
                 environment=env_vars,
                 network=settings.DOCKER_NETWORK,
                 remove=True,
                 detach=False,
-                volumes=self._get_aws_volume()
+                volumes=volumes
             )
 
             result = self._parse_container_output(container)
@@ -61,6 +78,8 @@ class DockerOrchestrator:
         except ImageNotFound:
             return {"status": "error", "database": "mongodb",
                     "error": "Imagen pharmavida-ingesta-mongodb:latest no encontrada. Ejecuta: docker build -t pharmavida-ingesta-mongodb:latest ./scripts/mongodb"}
+        except RuntimeError as e:
+            return {"status": "error", "database": "mongodb", "error": str(e)}
         except ContainerError as e:
             return {"status": "error", "database": "mongodb", "error": str(e)}
         except APIError as e:
@@ -79,13 +98,15 @@ class DockerOrchestrator:
                 "MYSQL_DATABASE": settings.MYSQL_DATABASE,
             })
 
+            volumes = self._get_aws_volume()
+
             container = self.client.containers.run(
                 image="pharmavida-ingesta-mysql:latest",
                 environment=env_vars,
                 network=settings.DOCKER_NETWORK,
                 remove=True,
                 detach=False,
-                volumes=self._get_aws_volume()
+                volumes=volumes
             )
 
             result = self._parse_container_output(container)
@@ -94,6 +115,8 @@ class DockerOrchestrator:
         except ImageNotFound:
             return {"status": "error", "database": "mysql",
                     "error": "Imagen pharmavida-ingesta-mysql:latest no encontrada. Ejecuta: docker build -t pharmavida-ingesta-mysql:latest ./scripts/mysql"}
+        except RuntimeError as e:
+            return {"status": "error", "database": "mysql", "error": str(e)}
         except ContainerError as e:
             return {"status": "error", "database": "mysql", "error": str(e)}
         except APIError as e:
@@ -112,13 +135,15 @@ class DockerOrchestrator:
                 "POSTGRES_DATABASE": settings.POSTGRES_DATABASE,
             })
 
+            volumes = self._get_aws_volume()
+
             container = self.client.containers.run(
                 image="pharmavida-ingesta-postgresql:latest",
                 environment=env_vars,
                 network=settings.DOCKER_NETWORK,
                 remove=True,
                 detach=False,
-                volumes=self._get_aws_volume()
+                volumes=volumes
             )
 
             result = self._parse_container_output(container)
@@ -127,6 +152,8 @@ class DockerOrchestrator:
         except ImageNotFound:
             return {"status": "error", "database": "postgresql",
                     "error": "Imagen pharmavida-ingesta-postgresql:latest no encontrada. Ejecuta: docker build -t pharmavida-ingesta-postgresql:latest ./scripts/postgresql"}
+        except RuntimeError as e:
+            return {"status": "error", "database": "postgresql", "error": str(e)}
         except ContainerError as e:
             return {"status": "error", "database": "postgresql", "error": str(e)}
         except APIError as e:
