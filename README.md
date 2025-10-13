@@ -77,7 +77,7 @@ backend-ingesta/
 ### 1. Configurar Variables de Entorno
 
 ```bash
-cp .env.example .env
+cp .env .env
 # Editar .env con tus configuraciones
 ```
 

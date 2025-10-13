@@ -22,7 +22,6 @@ class DockerOrchestrator:
         }
 
     def _get_aws_volume(self) -> Dict[str, Dict[str, str]]:
-        """Monta las credenciales de AWS (~/.aws) como volumen de solo lectura."""
         aws_path = os.path.expanduser("~/.aws")
         if not os.path.exists(aws_path):
             raise FileNotFoundError(f"No se encontró la carpeta de credenciales en {aws_path}")

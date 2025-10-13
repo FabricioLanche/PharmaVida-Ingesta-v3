@@ -10,7 +10,7 @@ services:
       - "8000:8000"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - ~/.aws/credentials:/root/.aws/credentials:ro
+      - ~/.aws:/root/.aws:ro
     restart: unless-stopped
     networks:
       - pharmavida_network

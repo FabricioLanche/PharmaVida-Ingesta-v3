@@ -18,7 +18,7 @@ fi
 if [ ! -f ".env" ]; then
     echo "⚠️  Advertencia: No se encuentra archivo .env"
     echo "📝 Copiando .env.example a .env..."
-    cp .env.example .env
+    cp .env .env
     echo "⚠️  IMPORTANTE: Edita el archivo .env con tus configuraciones antes de continuar"
     echo "   nano .env"
     exit 1
