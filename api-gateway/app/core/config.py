@@ -27,11 +27,8 @@ class Settings(BaseSettings):
     # AWS S3
     AWS_BUCKET_NAME: str
     AWS_REGION: Optional[str] = "us-east-1"
-    AWS_ACCESS_KEY_ID: str
-    AWS_SECRET_ACCESS_KEY: str
-    AWS_SESSION_TOKEN: Optional[str] = None
 
-    # Docker Network (opcional, solo si BD's en mismo host Docker)
+    # Docker Network (opcional)
     DOCKER_NETWORK: Optional[str] = "bridge"
 
     class Config:
