@@ -18,7 +18,7 @@ services:
       - "8000:8000"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:rw
-      - ${AWS_CREDENTIALS_PATH:-~/.aws}:/root/.aws:ro
+      - /home/ubuntu/.aws:/root/.aws:ro
     restart: unless-stopped
     networks:
       - pharmavida_network
@@ -29,36 +29,39 @@ services:
       retries: 3
       start_period: 40s
 
-  # MongoDB Ingesta - Solo para construir la imagen
-  mongodb-builder:
-    build: 
+  # MongoDB Ingesta - Construye y termina
+  script-mongodb:
+    build:
       context: ./scripts/mongodb
       dockerfile: Dockerfile
     image: pharmavida-ingesta-mongodb:latest
-    profiles:
-      - build
+    container_name: mongodb-builder
+    command: ["sh", "-c", "echo '✅ Imagen MongoDB construida correctamente'"]
+    restart: "no"
     networks:
       - pharmavida_network
 
-  # MySQL Ingesta - Solo para construir la imagen
-  mysql-builder:
-    build: 
+  # MySQL Ingesta - Construye y termina
+  script-mysql:
+    build:
       context: ./scripts/mysql
       dockerfile: Dockerfile
     image: pharmavida-ingesta-mysql:latest
-    profiles:
-      - build
+    container_name: mysql-builder
+    command: ["sh", "-c", "echo '✅ Imagen MySQL construida correctamente'"]
+    restart: "no"
     networks:
       - pharmavida_network
 
-  # PostgreSQL Ingesta - Solo para construir la imagen
-  postgresql-builder:
-    build: 
+  # PostgreSQL Ingesta - Construye y termina
+  script-postgresql:
+    build:
       context: ./scripts/postgresql
       dockerfile: Dockerfile
     image: pharmavida-ingesta-postgresql:latest
-    profiles:
-      - build
+    container_name: postgresql-builder
+    command: ["sh", "-c", "echo '✅ Imagen PostgreSQL construida correctamente'"]
+    restart: "no"
     networks:
       - pharmavida_network
 

@@ -3,6 +3,9 @@ import os
 from datetime import datetime
 import io
 
+# --- 👇 Asegura que boto3 lea las credenciales montadas en /root/.aws
+os.environ["AWS_SHARED_CREDENTIALS_FILE"] = "/root/.aws/credentials"
+
 
 class S3Uploader:
     def __init__(self):
