@@ -1,20 +1,68 @@
+version: '3.8'
+
 services:
-  # API Gateway - Único servicio activo
-  ingesta-api:
-    build: ./api-gateway
-    image: pharmavida_ingesta:latest
-    container_name: pharmavida_ingesta
+  # API Gateway - Servicio principal siempre activo
+  api-gateway:
+    build: 
+      context: ./api-gateway
+      dockerfile: Dockerfile
+    image: pharmavida-ingesta-api:latest
+    container_name: pharmavida_ingesta_api
     env_file:
       - .env
+    environment:
+      - AWS_BUCKET_NAME=${AWS_BUCKET_NAME}
+      - AWS_REGION=${AWS_REGION:-us-east-1}
+      - DOCKER_NETWORK=pharmavida_network
     ports:
       - "8000:8000"
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - ~/.aws:/root/.aws:ro
+      - /var/run/docker.sock:/var/run/docker.sock:rw
+      - ${AWS_CREDENTIALS_PATH:-~/.aws}:/root/.aws:ro
     restart: unless-stopped
+    networks:
+      - pharmavida_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # MongoDB Ingesta - Solo para construir la imagen
+  mongodb-builder:
+    build: 
+      context: ./scripts/mongodb
+      dockerfile: Dockerfile
+    image: pharmavida-ingesta-mongodb:latest
+    profiles:
+      - build
+    networks:
+      - pharmavida_network
+
+  # MySQL Ingesta - Solo para construir la imagen
+  mysql-builder:
+    build: 
+      context: ./scripts/mysql
+      dockerfile: Dockerfile
+    image: pharmavida-ingesta-mysql:latest
+    profiles:
+      - build
+    networks:
+      - pharmavida_network
+
+  # PostgreSQL Ingesta - Solo para construir la imagen
+  postgresql-builder:
+    build: 
+      context: ./scripts/postgresql
+      dockerfile: Dockerfile
+    image: pharmavida-ingesta-postgresql:latest
+    profiles:
+      - build
     networks:
       - pharmavida_network
 
 networks:
   pharmavida_network:
     driver: bridge
+    name: pharmavida_network
