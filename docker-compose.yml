@@ -1,9 +1,8 @@
 version: '3.8'
 
 services:
-  # API Gateway - Servicio principal siempre activo
   api-gateway:
-    build: 
+    build:
       context: ./api-gateway
       dockerfile: Dockerfile
     image: pharmavida-ingesta-api:latest
@@ -13,12 +12,13 @@ services:
     environment:
       - AWS_BUCKET_NAME=${AWS_BUCKET_NAME}
       - AWS_REGION=${AWS_REGION:-us-east-1}
+      - AWS_CREDENTIALS_HOST_PATH=${AWS_CREDENTIALS_HOST_PATH:-/home/ubuntu/.aws}
       - DOCKER_NETWORK=pharmavida_network
     ports:
       - "8000:8000"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:rw
-      - /home/ubuntu/.aws:/root/.aws:ro
+      - ${AWS_CREDENTIALS_HOST_PATH:-/home/ubuntu/.aws}:/root/.aws:ro
     restart: unless-stopped
     networks:
       - pharmavida_network
@@ -29,41 +29,41 @@ services:
       retries: 3
       start_period: 40s
 
-  # MongoDB Ingesta - Construye y termina
   script-mongodb:
     build:
       context: ./scripts/mongodb
       dockerfile: Dockerfile
     image: pharmavida-ingesta-mongodb:latest
     container_name: mongodb-builder
-    command: ["sh", "-c", "echo '✅ Imagen MongoDB construida correctamente'"]
-    restart: "no"
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["echo '✅ Imagen MongoDB construida correctamente'"]
     networks:
       - pharmavida_network
+    restart: "no"
 
-  # MySQL Ingesta - Construye y termina
   script-mysql:
     build:
       context: ./scripts/mysql
       dockerfile: Dockerfile
     image: pharmavida-ingesta-mysql:latest
     container_name: mysql-builder
-    command: ["sh", "-c", "echo '✅ Imagen MySQL construida correctamente'"]
-    restart: "no"
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["echo '✅ Imagen MySQL construida correctamente'"]
     networks:
       - pharmavida_network
+    restart: "no"
 
-  # PostgreSQL Ingesta - Construye y termina
   script-postgresql:
     build:
       context: ./scripts/postgresql
       dockerfile: Dockerfile
     image: pharmavida-ingesta-postgresql:latest
     container_name: postgresql-builder
-    command: ["sh", "-c", "echo '✅ Imagen PostgreSQL construida correctamente'"]
-    restart: "no"
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["echo '✅ Imagen PostgreSQL construida correctamente'"]
     networks:
       - pharmavida_network
+    restart: "no"
 
 networks:
   pharmavida_network:

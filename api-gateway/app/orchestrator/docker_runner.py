@@ -5,6 +5,9 @@ from app.core.config import settings
 import json
 import os
 from pathlib import Path
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class DockerOrchestrator:
@@ -16,27 +19,53 @@ class DockerOrchestrator:
             raise RuntimeError(f"No se pudo conectar al Docker daemon: {str(e)}")
 
     def _get_common_env(self) -> Dict[str, str]:
-        """Variables de entorno comunes (sin credenciales AWS explícitas)."""
+        """Variables de entorno comunes para AWS."""
         return {
             "AWS_BUCKET_NAME": settings.AWS_BUCKET_NAME,
-            "AWS_REGION": settings.AWS_REGION
+            "AWS_REGION": settings.AWS_REGION,
+            "AWS_PROFILE": "default",
+            "AWS_SHARED_CREDENTIALS_FILE": "/root/.aws/credentials",
+            "AWS_CONFIG_FILE": "/root/.aws/config"
         }
 
     def _get_aws_volume(self) -> Dict[str, Any]:
         """Monta el volumen de credenciales AWS desde el host."""
-        # Obtener ruta de credenciales desde variable de entorno o default
-        aws_credentials_path = os.getenv(
-            "AWS_CREDENTIALS_HOST_PATH",
-            str(Path.home() / ".aws")
-        )
-
-        # Verificar que la ruta existe en el host
+        # Obtener ruta de credenciales desde variable de entorno
+        aws_credentials_path = os.getenv("AWS_CREDENTIALS_HOST_PATH", "/home/ubuntu/.aws")
+        
+        logger.info(f"Intentando montar credenciales AWS desde: {aws_credentials_path}")
+        
+        # Verificar que la ruta existe
         if not os.path.exists(aws_credentials_path):
+            # Intentar rutas alternativas
+            alternative_paths = [
+                str(Path.home() / ".aws"),
+                "/root/.aws",
+                os.path.expanduser("~/.aws")
+            ]
+            
+            for alt_path in alternative_paths:
+                if os.path.exists(alt_path):
+                    aws_credentials_path = alt_path
+                    logger.info(f"Usando ruta alternativa: {aws_credentials_path}")
+                    break
+            else:
+                raise RuntimeError(
+                    f"No se encontraron credenciales AWS. Buscado en: {aws_credentials_path} "
+                    f"y alternativas: {alternative_paths}. "
+                    f"Por favor, asegúrate de que ~/.aws/credentials existe."
+                )
+        
+        # Verificar que el archivo credentials existe
+        credentials_file = os.path.join(aws_credentials_path, "credentials")
+        if not os.path.exists(credentials_file):
             raise RuntimeError(
-                f"No se encontraron credenciales AWS en {aws_credentials_path}. "
-                f"Por favor, asegúrate de que ~/.aws/credentials existe en el host."
+                f"Archivo de credenciales no encontrado en: {credentials_file}. "
+                f"Por favor, crea el archivo con: aws configure"
             )
-
+        
+        logger.info(f"✓ Credenciales AWS encontradas en: {aws_credentials_path}")
+        
         # Montar la carpeta .aws del host en /root/.aws del contenedor (read-only)
         return {aws_credentials_path: {"bind": "/root/.aws", "mode": "ro"}}
 
@@ -44,119 +73,109 @@ class DockerOrchestrator:
         """Parsea la salida del contenedor."""
         try:
             output_str = output.decode('utf-8').strip()
+            
+            # Log para debugging
+            logger.debug(f"Output del contenedor: {output_str}")
+            
+            # Intentar parsear como JSON
             return json.loads(output_str)
         except json.JSONDecodeError:
+            logger.warning(f"No se pudo parsear como JSON: {output_str}")
             return {"output": output_str}
         except Exception as e:
-            return {"error": f"Error parseando salida: {str(e)}", "raw_output": output_str}
+            logger.error(f"Error parseando salida: {str(e)}")
+            return {"error": f"Error parseando salida: {str(e)}", "raw_output": str(output)}
+
+    def _run_container(self, image: str, env_vars: Dict[str, str], database: str) -> Dict[str, Any]:
+        """Método genérico para ejecutar contenedores con manejo de errores mejorado."""
+        try:
+            volumes = self._get_aws_volume()
+            
+            logger.info(f"Ejecutando contenedor {image}")
+            logger.info(f"Red: {settings.DOCKER_NETWORK}")
+            logger.info(f"Variables de entorno: {list(env_vars.keys())}")
+            
+            # Ejecutar contenedor y capturar logs
+            container = self.client.containers.run(
+                image=image,
+                environment=env_vars,
+                network=settings.DOCKER_NETWORK,
+                remove=False,  # No remover automáticamente para poder ver logs
+                detach=True,
+                volumes=volumes
+            )
+            
+            # Esperar a que termine
+            result = container.wait()
+            
+            # Obtener logs
+            logs = container.logs().decode('utf-8')
+            logger.info(f"Logs del contenedor {database}:\n{logs}")
+            
+            # Remover contenedor
+            container.remove()
+            
+            # Verificar código de salida
+            if result['StatusCode'] != 0:
+                error_msg = f"El contenedor retornó código {result['StatusCode']}"
+                logger.error(f"{error_msg}\nLogs:\n{logs}")
+                return {
+                    "status": "error",
+                    "database": database,
+                    "error": error_msg,
+                    "logs": logs
+                }
+            
+            # Parsear resultado
+            parsed_result = self._parse_container_output(logs.encode('utf-8'))
+            return {"status": "success", "database": database, "result": parsed_result}
+            
+        except ImageNotFound:
+            error_msg = f"Imagen {image} no encontrada. Ejecuta: docker build -t {image} ./scripts/{database}"
+            logger.error(error_msg)
+            return {"status": "error", "database": database, "error": error_msg}
+        except RuntimeError as e:
+            logger.error(f"RuntimeError en {database}: {str(e)}")
+            return {"status": "error", "database": database, "error": str(e)}
+        except ContainerError as e:
+            logger.error(f"ContainerError en {database}: {str(e)}")
+            return {"status": "error", "database": database, "error": f"Error en contenedor: {str(e)}"}
+        except APIError as e:
+            logger.error(f"APIError en {database}: {str(e)}")
+            return {"status": "error", "database": database, "error": f"Error de Docker API: {str(e)}"}
+        except Exception as e:
+            logger.error(f"Error inesperado en {database}: {str(e)}", exc_info=True)
+            return {"status": "error", "database": database, "error": f"Error inesperado: {str(e)}"}
 
     async def run_mongodb_script(self) -> Dict[str, Any]:
-        try:
-            env_vars = self._get_common_env()
-            env_vars.update({
-                "MONGO_HOST": settings.MONGO_HOST,
-                "MONGO_PORT": str(settings.MONGO_PORT),
-                "MONGO_USER": settings.MONGO_USER,
-                "MONGO_PASSWORD": settings.MONGO_PASSWORD,
-                "MONGO_DATABASE": settings.MONGO_DATABASE,
-            })
-
-            volumes = self._get_aws_volume()
-
-            container = self.client.containers.run(
-                image="pharmavida-ingesta-mongodb:latest",
-                environment=env_vars,
-                network=settings.DOCKER_NETWORK,
-                remove=True,
-                detach=False,
-                volumes=volumes
-            )
-
-            result = self._parse_container_output(container)
-            return {"status": "success", "database": "mongodb", "result": result}
-
-        except ImageNotFound:
-            return {"status": "error", "database": "mongodb",
-                    "error": "Imagen pharmavida-ingesta-mongodb:latest no encontrada. Ejecuta: docker build -t pharmavida-ingesta-mongodb:latest ./scripts/mongodb"}
-        except RuntimeError as e:
-            return {"status": "error", "database": "mongodb", "error": str(e)}
-        except ContainerError as e:
-            return {"status": "error", "database": "mongodb", "error": str(e)}
-        except APIError as e:
-            return {"status": "error", "database": "mongodb", "error": str(e)}
-        except Exception as e:
-            return {"status": "error", "database": "mongodb", "error": str(e)}
+        env_vars = self._get_common_env()
+        env_vars.update({
+            "MONGO_HOST": settings.MONGO_HOST,
+            "MONGO_PORT": str(settings.MONGO_PORT),
+            "MONGO_USER": settings.MONGO_USER,
+            "MONGO_PASSWORD": settings.MONGO_PASSWORD,
+            "MONGO_DATABASE": settings.MONGO_DATABASE,
+        })
+        return self._run_container("pharmavida-ingesta-mongodb:latest", env_vars, "mongodb")
 
     async def run_mysql_script(self) -> Dict[str, Any]:
-        try:
-            env_vars = self._get_common_env()
-            env_vars.update({
-                "MYSQL_HOST": settings.MYSQL_HOST,
-                "MYSQL_PORT": str(settings.MYSQL_PORT),
-                "MYSQL_USER": settings.MYSQL_USER,
-                "MYSQL_PASSWORD": settings.MYSQL_PASSWORD,
-                "MYSQL_DATABASE": settings.MYSQL_DATABASE,
-            })
-
-            volumes = self._get_aws_volume()
-
-            container = self.client.containers.run(
-                image="pharmavida-ingesta-mysql:latest",
-                environment=env_vars,
-                network=settings.DOCKER_NETWORK,
-                remove=True,
-                detach=False,
-                volumes=volumes
-            )
-
-            result = self._parse_container_output(container)
-            return {"status": "success", "database": "mysql", "result": result}
-
-        except ImageNotFound:
-            return {"status": "error", "database": "mysql",
-                    "error": "Imagen pharmavida-ingesta-mysql:latest no encontrada. Ejecuta: docker build -t pharmavida-ingesta-mysql:latest ./scripts/mysql"}
-        except RuntimeError as e:
-            return {"status": "error", "database": "mysql", "error": str(e)}
-        except ContainerError as e:
-            return {"status": "error", "database": "mysql", "error": str(e)}
-        except APIError as e:
-            return {"status": "error", "database": "mysql", "error": str(e)}
-        except Exception as e:
-            return {"status": "error", "database": "mysql", "error": str(e)}
+        env_vars = self._get_common_env()
+        env_vars.update({
+            "MYSQL_HOST": settings.MYSQL_HOST,
+            "MYSQL_PORT": str(settings.MYSQL_PORT),
+            "MYSQL_USER": settings.MYSQL_USER,
+            "MYSQL_PASSWORD": settings.MYSQL_PASSWORD,
+            "MYSQL_DATABASE": settings.MYSQL_DATABASE,
+        })
+        return self._run_container("pharmavida-ingesta-mysql:latest", env_vars, "mysql")
 
     async def run_postgresql_script(self) -> Dict[str, Any]:
-        try:
-            env_vars = self._get_common_env()
-            env_vars.update({
-                "POSTGRES_HOST": settings.POSTGRES_HOST,
-                "POSTGRES_PORT": str(settings.POSTGRES_PORT),
-                "POSTGRES_USER": settings.POSTGRES_USER,
-                "POSTGRES_PASSWORD": settings.POSTGRES_PASSWORD,
-                "POSTGRES_DATABASE": settings.POSTGRES_DATABASE,
-            })
-
-            volumes = self._get_aws_volume()
-
-            container = self.client.containers.run(
-                image="pharmavida-ingesta-postgresql:latest",
-                environment=env_vars,
-                network=settings.DOCKER_NETWORK,
-                remove=True,
-                detach=False,
-                volumes=volumes
-            )
-
-            result = self._parse_container_output(container)
-            return {"status": "success", "database": "postgresql", "result": result}
-
-        except ImageNotFound:
-            return {"status": "error", "database": "postgresql",
-                    "error": "Imagen pharmavida-ingesta-postgresql:latest no encontrada. Ejecuta: docker build -t pharmavida-ingesta-postgresql:latest ./scripts/postgresql"}
-        except RuntimeError as e:
-            return {"status": "error", "database": "postgresql", "error": str(e)}
-        except ContainerError as e:
-            return {"status": "error", "database": "postgresql", "error": str(e)}
-        except APIError as e:
-            return {"status": "error", "database": "postgresql", "error": str(e)}
-        except Exception as e:
-            return {"status": "error", "database": "postgresql", "error": str(e)}
+        env_vars = self._get_common_env()
+        env_vars.update({
+            "POSTGRES_HOST": settings.POSTGRES_HOST,
+            "POSTGRES_PORT": str(settings.POSTGRES_PORT),
+            "POSTGRES_USER": settings.POSTGRES_USER,
+            "POSTGRES_PASSWORD": settings.POSTGRES_PASSWORD,
+            "POSTGRES_DATABASE": settings.POSTGRES_DATABASE,
+        })
+        return self._run_container("pharmavida-ingesta-postgresql:latest", env_vars, "postgresql")
