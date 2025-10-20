@@ -30,44 +30,44 @@ class DockerOrchestrator:
 
     def _get_aws_volume(self) -> Dict[str, Any]:
         """Monta el volumen de credenciales AWS desde el host."""
-        # Obtener ruta de credenciales desde variable de entorno
+        # Primero intentar desde la variable de entorno
         aws_credentials_path = os.getenv("AWS_CREDENTIALS_HOST_PATH", "/home/ubuntu/.aws")
         
         logger.info(f"Intentando montar credenciales AWS desde: {aws_credentials_path}")
         
-        # Verificar que la ruta existe
-        if not os.path.exists(aws_credentials_path):
-            # Intentar rutas alternativas
-            alternative_paths = [
-                str(Path.home() / ".aws"),
-                "/root/.aws",
-                os.path.expanduser("~/.aws")
-            ]
-            
-            for alt_path in alternative_paths:
-                if os.path.exists(alt_path):
-                    aws_credentials_path = alt_path
-                    logger.info(f"Usando ruta alternativa: {aws_credentials_path}")
-                    break
-            else:
-                raise RuntimeError(
-                    f"No se encontraron credenciales AWS. Buscado en: {aws_credentials_path} "
-                    f"y alternativas: {alternative_paths}. "
-                    f"Por favor, asegúrate de que ~/.aws/credentials existe."
-                )
+        # Verificar que la ruta existe en el HOST
+        # Si estamos en un contenedor, intentar encontrar la ruta montada
+        possible_paths = [
+            aws_credentials_path,  # Ruta del .env
+            "/root/.aws",  # Ruta dentro del contenedor API
+            str(Path.home() / ".aws"),
+            os.path.expanduser("~/.aws")
+        ]
         
-        # Verificar que el archivo credentials existe
-        credentials_file = os.path.join(aws_credentials_path, "credentials")
-        if not os.path.exists(credentials_file):
+        host_aws_path = None
+        for path in possible_paths:
+            credentials_file = os.path.join(path, "credentials")
+            if os.path.exists(credentials_file):
+                host_aws_path = path
+                logger.info(f"✓ Credenciales AWS encontradas en: {host_aws_path}")
+                break
+        
+        if not host_aws_path:
             raise RuntimeError(
-                f"Archivo de credenciales no encontrado en: {credentials_file}. "
-                f"Por favor, crea el archivo con: aws configure"
+                f"No se encontraron credenciales AWS. Buscado en: {possible_paths}. "
+                f"Por favor, asegúrate de que {aws_credentials_path}/credentials existe en el host "
+                f"o que las credenciales estén montadas en el contenedor API."
             )
         
-        logger.info(f"✓ Credenciales AWS encontradas en: {aws_credentials_path}")
+        # Si encontramos las credenciales en /root/.aws (contenedor API),
+        # necesitamos usar la ruta del HOST original
+        if host_aws_path == "/root/.aws":
+            # Estamos en un contenedor, usar la ruta del host
+            host_aws_path = aws_credentials_path
+            logger.info(f"Usando ruta del host para montar en contenedores hijos: {host_aws_path}")
         
         # Montar la carpeta .aws del host en /root/.aws del contenedor (read-only)
-        return {aws_credentials_path: {"bind": "/root/.aws", "mode": "ro"}}
+        return {host_aws_path: {"bind": "/root/.aws", "mode": "ro"}}
 
     def _parse_container_output(self, output: bytes) -> Dict[str, Any]:
         """Parsea la salida del contenedor."""
