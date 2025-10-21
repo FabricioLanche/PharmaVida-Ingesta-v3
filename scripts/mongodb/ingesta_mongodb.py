@@ -73,7 +73,8 @@ def main():
         # Extraer y subir medicos
         try:
             df_medicos = extract_medicos(db)
-            url_medicos = s3_uploader.upload_dataframe(df_medicos, 'mongodb', 'medicos')
+            # Cambiar 'mongodb' por 'mongodb/medicos' para crear subcarpeta
+            url_medicos = s3_uploader.upload_dataframe(df_medicos, 'mongodb/medicos', 'medicos')
             resultados['medicos'] = {
                 'url': url_medicos,
                 'registros': len(df_medicos)
@@ -86,7 +87,8 @@ def main():
         # Extraer y subir recetas
         try:
             df_recetas = extract_recetas(db)
-            url_recetas = s3_uploader.upload_dataframe(df_recetas, 'mongodb', 'recetas')
+            # Cambiar 'mongodb' por 'mongodb/recetas' para crear subcarpeta
+            url_recetas = s3_uploader.upload_dataframe(df_recetas, 'mongodb/recetas', 'recetas')
             resultados['recetas'] = {
                 'url': url_recetas,
                 'registros': len(df_recetas)
