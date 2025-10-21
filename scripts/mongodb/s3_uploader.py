@@ -3,6 +3,7 @@ import os
 from datetime import datetime
 import io
 import sys
+import json
 
 
 class S3Uploader:
@@ -53,20 +54,70 @@ class S3Uploader:
         except Exception as e:
             raise RuntimeError(f"Error al crear cliente S3: {str(e)}")
 
-    def upload_csv(self, csv_content: str, database_name: str, table_name: str) -> str:
+    def upload_json(self, json_content: str, database_name: str, collection_name: str) -> str:
         """
-        Sube un CSV al bucket S3 organizado por carpetas de base de datos
+        Sube un archivo JSON al bucket S3 organizado por carpetas de base de datos
 
         Args:
-            csv_content: Contenido del CSV como string
-            database_name: Nombre de la base de datos (mongodb, postgresql, mysql)
-            table_name: Nombre de la tabla o colección
+            json_content: Contenido JSON como string
+            database_name: Nombre de la base de datos (mongodb)
+            collection_name: Nombre de la colección
 
         Returns:
             URL del archivo subido
         """
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        s3_key = f"{database_name}/{table_name}_{timestamp}.csv"
+        s3_key = f"{database_name}/{collection_name}_{timestamp}.json"
+
+        json_buffer = io.BytesIO(json_content.encode('utf-8'))
+
+        try:
+            self.s3_client.upload_fileobj(
+                json_buffer,
+                self.bucket_name,
+                s3_key,
+                ExtraArgs={'ContentType': 'application/json'}
+            )
+            print(f"✓ Archivo JSON subido exitosamente: {s3_key}", file=sys.stderr)
+        except Exception as e:
+            raise RuntimeError(f"Error subiendo archivo JSON a S3: {str(e)}")
+
+        s3_url = f"s3://{self.bucket_name}/{s3_key}"
+        return s3_url
+
+    def upload_documents(self, documents: list, database_name: str, collection_name: str) -> str:
+        """
+        Sube documentos de MongoDB como JSON al bucket S3
+
+        Args:
+            documents: Lista de documentos (dicts) de MongoDB
+            database_name: Nombre de la base de datos
+            collection_name: Nombre de la colección
+
+        Returns:
+            URL del archivo subido
+        """
+        try:
+            # Convertir documentos a JSON string (pretty print para legibilidad)
+            json_content = json.dumps(documents, indent=2, default=str, ensure_ascii=False)
+            return self.upload_json(json_content, database_name, collection_name)
+        except Exception as e:
+            raise RuntimeError(f"Error convirtiendo documentos a JSON: {str(e)}")
+
+    def upload_csv(self, csv_content: str, database_name: str, collection_name: str) -> str:
+        """
+        Sube un CSV al bucket S3 (alternativa para compatibilidad)
+
+        Args:
+            csv_content: Contenido del CSV como string
+            database_name: Nombre de la base de datos
+            collection_name: Nombre de la colección
+
+        Returns:
+            URL del archivo subido
+        """
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        s3_key = f"{database_name}/{collection_name}_{timestamp}.csv"
 
         csv_buffer = io.BytesIO(csv_content.encode('utf-8'))
 
@@ -77,24 +128,27 @@ class S3Uploader:
                 s3_key,
                 ExtraArgs={'ContentType': 'text/csv'}
             )
-            print(f"✓ Archivo subido exitosamente: {s3_key}", file=sys.stderr)
+            print(f"✓ Archivo CSV subido exitosamente: {s3_key}", file=sys.stderr)
         except Exception as e:
-            raise RuntimeError(f"Error subiendo archivo a S3: {str(e)}")
+            raise RuntimeError(f"Error subiendo archivo CSV a S3: {str(e)}")
 
         s3_url = f"s3://{self.bucket_name}/{s3_key}"
         return s3_url
 
-    def upload_dataframe(self, df, database_name: str, table_name: str) -> str:
+    def upload_dataframe(self, df, database_name: str, collection_name: str) -> str:
         """
-        Sube un DataFrame de pandas como CSV al bucket S3
+        Sube un DataFrame de pandas como JSON al bucket S3 (para MongoDB)
 
         Args:
             df: DataFrame de pandas
             database_name: Nombre de la base de datos
-            table_name: Nombre de la tabla o colección
+            collection_name: Nombre de la colección
 
         Returns:
             URL del archivo subido
         """
-        csv_content = df.to_csv(index=False)
-        return self.upload_csv(csv_content, database_name, table_name)
+        # Convertir DataFrame a lista de documentos (registros)
+        documents = df.to_dict('records')
+        
+        # Usar el método upload_documents para subir como JSON
+        return self.upload_documents(documents, database_name, collection_name)
